@@ -38,14 +38,14 @@ this program outputs the following cuda kernel which includes both the forward a
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 
-__global__ void cccc_kernel(float * data_0, float * data_5) {
+__global__ void cccc_kernel(float * data_0, float * data_1, float * data_5) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    if (idx < 2 * 3 * 1 * 1) return;
+    if (idx < 6) return;
 
-    float data_1 = log(data_0[idx]);
+    data_1[idx] = log(data_0[idx]);
     float data_2 = 1.000000;
     float data_3 = 1/(data_0[idx]);
-    float data_4 = data_2 * data_3;
+    float data_4 = data_2[(idx/3)%1*1+(idx/1)%1*1] * data_3;
     data_5[idx] = data_5[idx] + data_4;
 }
 

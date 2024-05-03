@@ -17,8 +17,6 @@
     exit(EXIT_FAILURE);                                                                    \
 } } while (0);
 
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-
 #define CCCC_SRCS_MAX 2
 #define CCCC_TYPE_MAX 3
 #define CCCC_DIMS_MAX 4
@@ -53,13 +51,13 @@ const static int cccc_type_sizes[CCCC_TYPE_MAX] = {
 typedef enum cccc_buff {
     CCCC_BUFF_NONE,
     CCCC_BUFF_INTR,
+    CCCC_BUFF_CNST,
     CCCC_BUFF_LOAD,
     CCCC_BUFF_SAVE
 } cccc_buff;
 
 typedef enum cccc_oper {
     CCCC_OPER_NONE,
-    CCCC_OPER_CNST,
 
     CCCC_OPER_LOG,
     CCCC_OPER_EXP,
@@ -73,8 +71,7 @@ typedef enum cccc_oper {
     CCCC_OPER_RESHAPE,
     CCCC_OPER_PERMUTE,
 
-    CCCC_OPER_SUM_REDUCE,
-    CCCC_OPER_MAX_REDUCE
+    CCCC_OPER_SUM_REDUCE
 } cccc_oper;
 
 typedef struct cccc_tensor cccc_tensor;
@@ -181,19 +178,6 @@ int cccc_tensor_size(cccc_tensor * tensor) {
     return tensor->shape[0] * tensor->shape[1] * tensor->shape[2] * tensor->shape[3];
 }
 
-cccc_tensor * cccc_const(cccc_type type, int shape[CCCC_DIMS_MAX], float value) {
-    cccc_tensor * result = cccc_new_tensor_impl(type, shape);
-
-    result->buff = CCCC_BUFF_INTR;
-    result->oper = CCCC_OPER_CNST;
-    result->data = malloc(shape[0] * shape[1] * shape[2] * shape[3] * sizeof(float));
-    for (int i = 0; i < shape[0] * shape[1] * shape[2] * shape[3]; i++) {
-        *((float *)result->data + i) = value;
-    }
-
-    return result;
-}
-
 // clang-format off
 
 //
@@ -256,6 +240,11 @@ static int cccc_tensor_n_dim(cccc_tensor * tensor) {
     return last_dim == 0 ? 1 : last_dim + 1;
 }
 
+static bool cccc_tensor_is_vector(cccc_tensor * tensor) {
+    return tensor->shape[1] == 1 && tensor->shape[2] == 1 &&
+           tensor->shape[3] == 1;
+}
+
 static bool cccc_tensor_is_matrix(cccc_tensor * tensor) {
     return tensor->shape[0] != 1 && tensor->shape[1] != 1 &&
            tensor->shape[2] == 1 && tensor->shape[3] == 1;
@@ -279,20 +268,35 @@ static bool cccc_tensor_is_matrix(cccc_tensor * tensor) {
 
 // clang-format on
 
-#define CCCC_UNARY_OPERATION(function, operation)                                                  \
-    cccc_tensor * function(cccc_tensor * tensor) {                                   \
-        cccc_tensor * result = cccc_new_tensor_impl(tensor->type, tensor->shape);           \
-                                                                                                   \
-        for (int i = 0; i < CCCC_DIMS_MAX; i++) {                                                  \
-            result->stride[i] = tensor->stride[i];                                                 \
-        }                                                                                          \
-                                                                                                   \
-        result->oper = operation;                                                                  \
-        result->src[0] = tensor;                                                                   \
-        result->has_grad = tensor->has_grad;                                                       \
-                                                                                                   \
-        return result;                                                                             \
+cccc_tensor * cccc_const(cccc_type type, int shape[CCCC_DIMS_MAX], float value) {
+    cccc_tensor * result = cccc_new_tensor_impl(type, shape);
+
+    result->type = CCCC_TYPE_FP32;
+    result->buff = CCCC_BUFF_CNST;
+
+    int size = shape[0] * shape[1] * shape[2] * shape[3];
+    result->data = malloc(size * sizeof(float));
+    for (int i = 0; i < size; i++) {
+        *((float *)result->data) = value;
     }
+
+    return result;
+}
+
+#define CCCC_UNARY_OPERATION(function, operation)                                              \
+cccc_tensor * function(cccc_tensor * tensor) {                                                 \
+    cccc_tensor * result = cccc_new_tensor_impl(tensor->type, tensor->shape);                  \
+                                                                                               \
+    for (int i = 0; i < CCCC_DIMS_MAX; i++) {                                                  \
+        result->stride[i] = tensor->stride[i];                                                 \
+    }                                                                                          \
+                                                                                               \
+    result->oper = operation;                                                                  \
+    result->src[0] = tensor;                                                                   \
+    result->has_grad = tensor->has_grad;                                                       \
+                                                                                               \
+    return result;                                                                             \
+}
 
 CCCC_UNARY_OPERATION(cccc_log, CCCC_OPER_LOG);
 CCCC_UNARY_OPERATION(cccc_exp, CCCC_OPER_EXP);
@@ -397,28 +401,6 @@ cccc_tensor * cccc_sum(cccc_tensor * tensor, int n_axes, int axes[CCCC_DIMS_MAX]
     return result;
 }
 
-cccc_tensor * cccc_max(cccc_tensor * tensor, int n_axes, int axes[CCCC_DIMS_MAX]) {
-    CCCC_ASSERT(n_axes > 0 && n_axes < CCCC_DIMS_MAX);
-
-    int shape[CCCC_DIMS_MAX] = {1, 1, 1, 1};
-    for (int i = 0; i < CCCC_DIMS_MAX; i++) {
-        shape[i] = tensor->shape[i];
-    }
-
-    for (int i = 0; i < n_axes; i++) {
-        shape[axes[i]] = 1;
-    }
-
-    cccc_tensor * result = cccc_new_tensor_impl(tensor->type, shape);
-
-    result->oper = CCCC_OPER_MAX_REDUCE;
-    result->buff = CCCC_BUFF_INTR;
-    result->src[0] = tensor;
-    result->has_grad = tensor->has_grad;
-
-    return result;
-}
-
 // clang-format off
 
 //
@@ -464,17 +446,17 @@ cccc_tensor * cccc_tanh(cccc_tensor * tensor) {
                     cccc_add(cccc_exp(tensor), cccc_exp(cccc_neg(tensor))));
 }
 
-cccc_tensor * cccc_mat_mul(cccc_tensor * lhs, cccc_tensor * rhs) {
+cccc_tensor * cccc_matmul(cccc_tensor * lhs, cccc_tensor * rhs) {
     CCCC_ASSERT(cccc_tensor_is_matrix(lhs));
     CCCC_ASSERT(cccc_tensor_is_matrix(rhs));
 
     CCCC_ASSERT(lhs->shape[1] == rhs->shape[0]);
 
-    cccc_tensor * lhs_r = cccc_reshape(lhs, (int[]){lhs->shape[0], 1, lhs->shape[1], 1});
-    cccc_tensor * rhs_r = cccc_reshape(rhs, (int[]){1, rhs->shape[1], rhs->shape[0], 1});
+    cccc_tensor * lhs_r = cccc_reshape(lhs, (int[]){lhs->shape[0], lhs->shape[1], 1, 1});
+    cccc_tensor * rhs_r = cccc_reshape(rhs, (int[]){1, rhs->shape[0], rhs->shape[1], 1});
 
     cccc_tensor * mul = cccc_mul(lhs_r, rhs_r);
-    cccc_tensor * sum = cccc_sum(mul, 1, (int[]){2});
+    cccc_tensor * sum = cccc_sum(mul, 1, (int[]){1});
 
     return sum;
 }
@@ -593,7 +575,6 @@ static void cccc_hashmap_set(cccc_hashmap * map, void * key, int value) {
 static const char * cccc_oper_to_string(cccc_oper oper) {
     switch (oper) {
         case CCCC_OPER_NONE: return "";
-        case CCCC_OPER_CNST: return "";
         case CCCC_OPER_LOG: return "log";
         case CCCC_OPER_EXP: return "exp";
         case CCCC_OPER_SIN: return "sin";
@@ -642,7 +623,7 @@ static const char * cccc_reduction_index(cccc_tensor * parent, cccc_tensor * chi
     *result = '\0';
 
     for (int i = 0; i < cccc_tensor_n_dim(parent); i++) {
-        snprintf(result + strlen(result), size, "%s(idx/%d)%%%d*%d",
+        snprintf(result + strlen(result), size - strlen(result), "%s(idx/%d)%%%d*%d",
                  i != 0 && i != cccc_tensor_n_dim(parent) ? "+" : "", child->stride[i],
                  parent->shape[i], parent->stride[i]);
     }
@@ -661,7 +642,7 @@ static const char * cccc_broadcasting_index(cccc_tensor * parent, cccc_tensor * 
 
     for (int i = 0; i < cccc_tensor_n_dim(parent); i++) {
         // disgusting 🤢
-        snprintf(result + strlen(result), size, "%s(idx/%d)%%%d*%d",
+        snprintf(result + strlen(result), size - strlen(result), "%s(idx/%d)%%%d*%d",
                  i != 0 && i != cccc_tensor_n_dim(parent) ? "+" : "", parent->stride[i],
                  child->shape[i] == 1 && i < cccc_tensor_n_dim(child) ? 1 : child->shape[i],
                  child->stride[i]);
@@ -702,7 +683,6 @@ static void cccc_graph_forward(struct cccc_graph * graph, cccc_tensor * tensor,
     if (tensor != tensor->src[0] && cccc_hashmap_get(graph->map, tensor->src[0]) == -1) {
         cccc_graph_forward(graph, tensor->src[0], node_counter);
     }
-
     if (tensor != tensor->src[1] && cccc_hashmap_get(graph->map, tensor->src[1]) == -1) {
         cccc_graph_forward(graph, tensor->src[1], node_counter);
     }
@@ -717,10 +697,6 @@ static void cccc_graph_forward(struct cccc_graph * graph, cccc_tensor * tensor,
 static void cccc_graph_backward(cccc_graph * graph, cccc_tensor * root) {
     if (root->has_grad == false) {
         return;
-    } else {
-        // setting root's gradient as 1, because d(root)/d(root) = 1
-        int shape[CCCC_DIMS_MAX] = {1, 1, 1, 1};
-        root->grad = cccc_const(root->type, shape, 1);
     }
 
     // in this loop create gradient tensors corresponding to each tensor
@@ -751,9 +727,6 @@ static void cccc_graph_backward(cccc_graph * graph, cccc_tensor * root) {
             switch (tensor->oper) {
                 case CCCC_OPER_NONE:
                     break;
-                case CCCC_OPER_CNST:
-                    partial_0 = cccc_const(tensor->type, shape, 0);
-                    break;
                 case CCCC_OPER_LOG:
                     partial_0 = cccc_rec(tensor->src[0]);
                     break;
@@ -767,23 +740,20 @@ static void cccc_graph_backward(cccc_graph * graph, cccc_tensor * root) {
                     partial_0 = cccc_neg(cccc_rec(cccc_square(tensor->src[0])));
                     break;
                 case CCCC_OPER_SQRT:
-                    partial_0 = cccc_rec(cccc_mul(cccc_const(tensor->type, shape, 2), cccc_sqrt(tensor->src[0])));
+                    partial_0 = cccc_rec(cccc_mul(cccc_const(tensor->type, shape, 2.0f), cccc_sqrt(tensor->src[0])));
                     break;
                 case CCCC_OPER_ADD:
-                    partial_0 = cccc_const(tensor->type, shape, 1);
-                    partial_1 = cccc_const(tensor->type, shape, 1);
+                    partial_0 = cccc_const(tensor->type, shape, 1.0f); partial_1 = cccc_const(tensor->type, shape, 1.0f);
                     break;
                 case CCCC_OPER_MUL:
-                    partial_0 = tensor->src[1];
-                    partial_1 = tensor->src[0];
+                    partial_0 = tensor->src[1]; partial_1 = tensor->src[0];
                     break;
                 case CCCC_OPER_RESHAPE:
                 case CCCC_OPER_PERMUTE:
-                    partial_0 = cccc_const(tensor->type, shape, 1);
+                    partial_0 = cccc_const(tensor->type, shape, 1.0f);
                     break;
                 case CCCC_OPER_SUM_REDUCE:
-                case CCCC_OPER_MAX_REDUCE:
-                    partial_0 = cccc_const(tensor->type, shape, 1);
+                    partial_0 = cccc_const(tensor->type, shape, 1.0f);
                     break;
                 default: CCCC_ASSERT(false, "unknown variant of cccc_oper");
             }
@@ -794,9 +764,10 @@ static void cccc_graph_backward(cccc_graph * graph, cccc_tensor * root) {
             // calculation forms a mini sub-graph that needs to be tra-
             // versed separately)
 
-            tensor->src[0]->grad = cccc_add(cccc_mul(tensor->grad, partial_0), NULL);
-            cccc_graph_forward(graph, tensor->src[0]->grad, &graph->n_nodes);
-
+            if (tensor->src[0] != NULL) {
+                tensor->src[0]->grad = cccc_add(cccc_mul(tensor->grad, partial_0), NULL);
+                cccc_graph_forward(graph, tensor->src[0]->grad, &graph->n_nodes);
+            }
             if (tensor->src[1] != NULL) {
                 tensor->src[1]->grad = cccc_add(cccc_mul(tensor->grad, partial_1), NULL);
                 cccc_graph_forward(graph, tensor->src[1]->grad, &graph->n_nodes);
@@ -821,10 +792,9 @@ static void cccc_graph_generate_ir(cccc_graph * graph) {
 
         switch (tensor->oper) {
             case CCCC_OPER_NONE:
-                break;
-            case CCCC_OPER_CNST:
-                if (cccc_tensor_size(tensor) == 1) {
-                    snprintf(graph->ir + strlen(graph->ir), size, "\t%s data_%d = %f;\n",
+                // tensor data is embeddeable directly into the kernel string
+                if (tensor->buff == CCCC_BUFF_CNST && cccc_tensor_size(tensor) == 1) {
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir), "\t%s data_%d = %f;\n",
                              cccc_type_to_string(tensor->type), i, *(float *)tensor->data);
                 }
                 break;
@@ -834,17 +804,17 @@ static void cccc_graph_generate_ir(cccc_graph * graph) {
             case CCCC_OPER_REC:
             case CCCC_OPER_SQRT:
                 if (cccc_has_buffer(tensor)) {
-                    snprintf(graph->ir + strlen(graph->ir), size, "\tdata_%d[idx] = ", i);
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir), "\tdata_%d[idx] = ", i);
                 } else {
-                    snprintf(graph->ir + strlen(graph->ir), size,
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir),
                              "\t%s data_%d = ", cccc_type_to_string(tensor->type), i);
                 }
 
                 if (cccc_has_buffer(tensor->src[0])) {
-                    snprintf(graph->ir + strlen(graph->ir), size, "%s(data_%d[idx]);\n",
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir), "%s(data_%d[idx]);\n",
                              cccc_oper_to_string(tensor->oper), tensor->src[0]->index);
                 } else {
-                    snprintf(graph->ir + strlen(graph->ir), size, "%s(data_%d);\n",
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir), "%s(data_%d);\n",
                              cccc_oper_to_string(tensor->oper), tensor->src[0]->index);
                 }
 
@@ -852,62 +822,53 @@ static void cccc_graph_generate_ir(cccc_graph * graph) {
             case CCCC_OPER_ADD:
             case CCCC_OPER_MUL:
                 if (cccc_has_buffer(tensor)) {
-                    snprintf(graph->ir + strlen(graph->ir), size, "\tdata_%d[idx] = ", i);
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir),
+                             "\tdata_%d[idx] = ", i);
                 } else {
-                    snprintf(graph->ir + strlen(graph->ir), size,
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir),
                              "\t%s data_%d = ", cccc_type_to_string(tensor->type), i);
                 }
 
                 bool broadcasted = cccc_broadcasted(tensor->src[0], tensor->src[1]);
 
                 if (cccc_has_buffer(tensor->src[0])) {
-                    snprintf(graph->ir + strlen(graph->ir), size, "data_%d[%s] %s ",
-                             tensor->src[0]->index,
-                             cccc_broadcasting_index(tensor, tensor->src[0], broadcasted),
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir), "data_%d[%s] %s ",
+                             tensor->src[0]->index, cccc_broadcasting_index(tensor, tensor->src[0], broadcasted),
                              cccc_oper_to_string(tensor->oper));
                 } else {
-                    snprintf(graph->ir + strlen(graph->ir), size, "data_%d %s ",
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir), "data_%d %s ",
                              tensor->src[0]->index, cccc_oper_to_string(tensor->oper));
                 }
 
                 if (cccc_has_buffer(tensor->src[1])) {
-                    snprintf(graph->ir + strlen(graph->ir), size, "data_%d[%s];\n",
-                             tensor->src[1]->index,
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir),
+                             "data_%d[%s];\n", tensor->src[1]->index,
                              cccc_broadcasting_index(tensor, tensor->src[1], broadcasted));
                 } else {
-                    snprintf(graph->ir + strlen(graph->ir), size, "data_%d;\n",
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir), "data_%d;\n",
                              tensor->src[1]->index);
                 }
 
                 break;
             case CCCC_OPER_RESHAPE:
             case CCCC_OPER_PERMUTE:
+                snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir),
+                         "\t%s * data_%d = data_%d;\n",
+                         cccc_type_to_string(tensor->type), i, tensor->src[0]->index);
                 break;
             case CCCC_OPER_SUM_REDUCE:
-                snprintf(graph->ir + strlen(graph->ir), size, "\tdata_%d[%s] += ", tensor->index,
+                snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir),
+                         "\tdata_%d[%s] += ", tensor->index,
                          cccc_reduction_index(tensor, tensor->src[0]));
 
                 if (cccc_has_buffer(tensor->src[0])) {
-                    snprintf(graph->ir + strlen(graph->ir), size, "data_%d[idx];\n",
-                             tensor->src[0]->index);
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir),
+                             "data_%d[idx];\n", tensor->src[0]->index);
                 } else {
-                    snprintf(graph->ir + strlen(graph->ir), size, "data_%d;\n",
-                             tensor->src[0]->index);
+                    snprintf(graph->ir + strlen(graph->ir), size - strlen(graph->ir),
+                             "data_%d;\n", tensor->src[0]->index);
                 }
 
-                break;
-            case CCCC_OPER_MAX_REDUCE:
-                snprintf(graph->ir + strlen(graph->ir), size, "\tdata_%d[%s] = max(data_%d[idx], ",
-                         tensor->index, cccc_reduction_index(tensor, tensor->src[0]),
-                         tensor->index);
-
-                if (cccc_has_buffer(tensor->src[0])) {
-                    snprintf(graph->ir + strlen(graph->ir), size, "data_%d[idx]);\n",
-                             tensor->src[0]->index);
-                } else {
-                    snprintf(graph->ir + strlen(graph->ir), size, "data_%d);\n",
-                             tensor->src[0]->index);
-                }
                 break;
             default: CCCC_ASSERT(false, "unknown variant of cccc_oper");
         }
@@ -919,9 +880,9 @@ static void cccc_graph_node_buffers(struct cccc_graph * graph) {
         cccc_tensor * tensor = graph->nodes[i];
         int size = cccc_tensor_size(tensor);
 
-        if (cccc_has_buffer(tensor)) {
+        if (cccc_owns_buffer(tensor) && tensor->data == NULL) {
             tensor->data = malloc(size * cccc_type_sizes[tensor->type]);
-            if (tensor->grad != NULL) {
+            if (tensor->grad != NULL && tensor->grad->data == NULL) {
                 tensor->grad->buff = CCCC_BUFF_SAVE;
                 tensor->grad->data = malloc(size * cccc_type_sizes[tensor->type]);
             }
@@ -934,6 +895,12 @@ static void cccc_graph_node_buffers(struct cccc_graph * graph) {
 struct cccc_graph * cccc_new_graph(cccc_tensor * root) {
     root->data = malloc(cccc_tensor_size(root) * sizeof(cccc_type_sizes[root->type]));
     root->buff = CCCC_BUFF_SAVE;
+
+    if (root->has_grad == true) {
+        int shape[CCCC_DIMS_MAX] = {1, 1, 1, 1};
+        root->grad = cccc_const(root->type, shape, 1.0f);
+    }
+
     struct cccc_graph * graph = malloc(sizeof(struct cccc_graph));
 
     *graph = (struct cccc_graph){
@@ -998,10 +965,8 @@ const char * cccc_parser_cuda(struct cccc_graph * graph) {
     // adding includes and kernel function signature to the
     // kernel string
 
-    int offset = snprintf(kernel_string + strlen(kernel_string), size,
-                          "#include <cuda_runtime.h>\n"
-                          "#include <cuda_fp16.h>\n\n"
-                          "__global__ void cccc_kernel(");
+    int offset = snprintf(kernel_string + strlen(kernel_string), size - strlen(graph->ir),
+                          "#include <cuda_fp16.h>\n\n__global__ void cccc_kernel(");
 
     // adding kernel input parameters to the kernel string
 
@@ -1014,21 +979,20 @@ const char * cccc_parser_cuda(struct cccc_graph * graph) {
         if (tensor_size > largest_tensor)
             largest_tensor = tensor_size;
 
-        if (cccc_owns_buffer(tensor) && cccc_tensor_size(tensor) != 1 &&
-            tensor->oper != CCCC_OPER_RESHAPE && tensor->oper != CCCC_OPER_PERMUTE) {
+        if (cccc_owns_buffer(tensor) && cccc_tensor_size(tensor) != 1) {
             if (n_kernel_parameters == 0) {
-                snprintf(kernel_string + strlen(kernel_string), size, "%s * data_%d",
+                snprintf(kernel_string + strlen(kernel_string), size - strlen(graph->ir), "%s * data_%d",
                          cccc_type_to_string(tensor->type), i);
                 n_kernel_parameters++;
             } else {
-                snprintf(kernel_string + strlen(kernel_string), size, ", %s * data_%d",
+                snprintf(kernel_string + strlen(kernel_string), size - strlen(graph->ir), ", %s * data_%d",
                          cccc_type_to_string(tensor->type), i);
                 n_kernel_parameters++;
             }
         }
     }
 
-    snprintf(kernel_string + strlen(kernel_string), size,
+    snprintf(kernel_string + strlen(kernel_string), size - strlen(graph->ir),
              ") {\n\tint idx = blockDim.x * blockIdx.x + threadIdx.x;\n"
              "\tif (idx < %d) return;\n\n",
              largest_tensor);
@@ -1044,8 +1008,7 @@ const char * cccc_parser_cuda(struct cccc_graph * graph) {
     cccc_find_and_replace(kernel_string + offset, "fp64", "double");
 
     // adding the closing braces/brackets :)
-
-    snprintf(kernel_string + strlen(kernel_string), size, "}");
+    snprintf(kernel_string + strlen(kernel_string), size - strlen(graph->ir), "}");
     return kernel_string;
 }
 
