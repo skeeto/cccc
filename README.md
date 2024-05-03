@@ -15,11 +15,11 @@
 
 int main(){
     // set up a 2d 32-bit float tensor w/ gradien tracking
-    struct cccc_tensor * x = cccc_new_tensor(CCCC_TYPE_FP32, 2, 3, 1, 1, true);
-    struct cccc_tensor * y = cccc_log(x);
+    cccc_tensor * x = cccc_new_tensor_2d(CCCC_TYPE_FP32, 2, 3, true);
+    cccc_tensor * y = cccc_log(x);
 
     // constructing a computational graph
-    struct cccc_graph * graph = cccc_new_graph(y);
+    cccc_graph * graph = cccc_new_graph(y);
 
     // parsing the graph w/ a cuda parser
     const char * kernel_string = cccc_parser_cuda(graph);
