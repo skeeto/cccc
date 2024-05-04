@@ -229,15 +229,9 @@ static bool cccc_broadcasted(cccc_tensor * lhs, cccc_tensor * rhs) {
 
 static bool cccc_has_buffer(cccc_tensor * tensor) {
     switch (tensor->buff) {
-        case CCCC_BUFF_NONE: return false;
-        default: return true;
-    }
-}
-
-static bool cccc_owns_buffer(cccc_tensor * tensor) {
-    switch (tensor->buff) {
         case CCCC_BUFF_NONE:
-        case CCCC_BUFF_INTR: return false;
+        case CCCC_BUFF_INTR:
+        case CCCC_BUFF_CNST: return false;
         default: return true;
     }
 }
@@ -892,7 +886,7 @@ static void cccc_graph_node_buffers(struct cccc_graph * graph) {
         cccc_tensor * tensor = graph->nodes[i];
         int size = cccc_tensor_size(tensor);
 
-        if (cccc_owns_buffer(tensor) && tensor->data == NULL) {
+        if (cccc_has_buffer(tensor) && tensor->data == NULL) {
             tensor->data = malloc(size * cccc_type_sizes[tensor->type]);
             if (tensor->grad != NULL && tensor->grad->data == NULL) {
                 tensor->grad->buff = CCCC_BUFF_SAVE;
@@ -991,7 +985,7 @@ const char * cccc_parser_cuda(struct cccc_graph * graph) {
         if (tensor_size > largest_tensor)
             largest_tensor = tensor_size;
 
-        if (cccc_owns_buffer(tensor) && cccc_tensor_size(tensor) != 1) {
+        if (cccc_has_buffer(tensor) && cccc_tensor_size(tensor) != 1) {
             if (n_kernel_parameters == 0) {
                 snprintf(kernel_string + strlen(kernel_string), size - strlen(graph->ir), "%s * data_%d",
                          cccc_type_to_string(tensor->type), i);

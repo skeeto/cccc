@@ -29,7 +29,7 @@ int main() {
 this program outputs the following cuda kernel which includes both the forward and the backward pass all fused into a single kernel
 
 ```cuda
-__global__ void kernel(float * data_0, float * data_2, float * data_11) {
+__global__ void cccc_kernel(float * data_0, float * data_2, float * data_11) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if (idx < 6) return;
 
@@ -37,9 +37,9 @@ __global__ void kernel(float * data_0, float * data_2, float * data_11) {
     data_2[idx] = sin(data_1);
     float data_3 = 1.000000;
     float data_4 = 1.570796;
-    float data_5 = data_1 + data_4[(idx/3)%1*1+(idx/1)%1*1];
+    float data_5 = data_1 + data_4;
     float data_6 = sin(data_5);
-    float data_7 = data_3[(idx/3)%1*1+(idx/1)%1*1] * data_6;
+    float data_7 = data_3 * data_6;
     float data_8 = data_8 + data_7;
     float data_9 = 1/(data_0[idx]);
     float data_10 = data_8 * data_9;
