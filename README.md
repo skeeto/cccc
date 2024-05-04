@@ -14,15 +14,19 @@
 #include "cccc.h"
 
 int main() {
-    // define 2d tensor x with fp32 data type, with gradient tracking
-    cccc_tensor * x = cccc_new_tensor_2d(CCCC_TYPE_FP32, 2, 3, true);
-    cccc_tensor * y = cccc_sin(cccc_log(x));
+    int cap = 1<<21;  // 2 MiB
+    char * mem = malloc(cap);
+    cccc_arena a[1] = {{mem, mem+cap}};
 
-    cccc_graph * graph = cccc_new_graph(y);
-    const char * ir = cccc_parser_cuda(graph);
+    // define 2d tensor x with fp32 data type, with gradient tracking
+    cccc_tensor * x = cccc_new_tensor_2d(CCCC_TYPE_FP32, 2, 3, true, a);
+    cccc_tensor * y = cccc_sin(cccc_log(x, a), a);
+
+    cccc_graph * graph = cccc_new_graph(y, a);
+    const char * ir = cccc_parser_cuda(graph, a);
 
     printf("%s\n", ir);
-    cccc_graph_free(graph);
+    free(mem);
 }
 ```
 
