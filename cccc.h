@@ -23,6 +23,9 @@
 #define CCCC_CHAR_MAX 100
 #define CCCC_NODE_MAX 256
 
+#define __STDC_WANT_IEC_60559_TYPES_EXT__
+#include <float.h>
+
 // clang-format off
 
 //
@@ -43,16 +46,25 @@ typedef enum cccc_type {
 } cccc_type;
 
 const static int cccc_type_sizes[CCCC_TYPE_MAX] = {
+#if defined(FLT16_MAX)
     [CCCC_TYPE_FP16] = sizeof(_Float16),
+#else
+    [CCCC_TYPE_FP16] = sizeof(float),
+#endif
     [CCCC_TYPE_FP32] = sizeof(float),
     [CCCC_TYPE_FP64] = sizeof(double)
 };
 
 typedef enum cccc_buff {
+    // default buffer
     CCCC_BUFF_NONE,
+    // only exist as intermediary scalar values in compute kernels
     CCCC_BUFF_INTR,
+    // allocated buffer for constant tensors
     CCCC_BUFF_CNST,
+    // dedicated buffer for tensors whose data is loaded from memory
     CCCC_BUFF_LOAD,
+    // dedicated buffer for tensors whose data is saved into memory
     CCCC_BUFF_SAVE
 } cccc_buff;
 

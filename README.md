@@ -16,9 +16,9 @@
 int main() {
     // define 2d tensor x with fp32 data type, with gradient tracking
     cccc_tensor * x = cccc_new_tensor_2d(CCCC_TYPE_FP32, 2, 3, true);
-    cccc_tensor * z = cccc_sin(cccc_log(x));
+    cccc_tensor * y = cccc_sin(cccc_log(x));
 
-    cccc_graph * graph = cccc_new_graph(z);
+    cccc_graph * graph = cccc_new_graph(y);
     const char * ir = cccc_parser_cuda(graph);
 
     printf("%s\n", ir);
