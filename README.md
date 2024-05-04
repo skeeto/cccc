@@ -1,55 +1,50 @@
 ### What?
 
-❇️ cccc.h is a single header pure C implementation of primitive autodiff w/ no dependencies, kernel fusion and automatic compute kernel generation (only CUDA for now)
+❇️ cccc.h is a single header pure C implementation of primitive autodiff w/ no dependencies, kernel fusion and automatic compute kernel generation
 
-❇️ cccc.h is ~1000 lines of code, so hopefully it can be useful as a learning opportunity (cccc.h is experimental and probably contains unsafe code and errors)
+❇️ cccc.h is ~1000 lines of code, so hopefully it can be useful as a learning opportunity
 
 ❇️ cccc.h follows the design philosophy of libraries like tinygrad and luminal, where all operations are defined in terms of a small set of primitive operations
 
 ### How?
 
-❇️ the following example defines a computation `ln(x) = y`, constructs a computational graph that evaluates `y` as well as `d(y)/d(x)`, keep in mind that  this is a simple example, and supported operations can be arbitrarily stacked on top of each other
+❇️ the following example defines a computation `sin(ln(x)) = y` and generates a kernel that calculates the value of `y` as well as `dy/dx` gradient accumulation
 
 ```c
 #include "cccc.h"
 
-int main(){
-    // set up a 2d 32-bit float tensor w/ gradien tracking
+int main() {
+    // define 2d tensor x with fp32 data type, with gradient tracking
     cccc_tensor * x = cccc_new_tensor_2d(CCCC_TYPE_FP32, 2, 3, true);
-    cccc_tensor * y = cccc_log(x);
+    cccc_tensor * z = cccc_sin(cccc_log(x));
 
-    // constructing a computational graph
-    cccc_graph * graph = cccc_new_graph(y);
+    cccc_graph * graph = cccc_new_graph(z);
+    const char * ir = cccc_parser_cuda(graph);
 
-    // parsing the graph w/ a cuda parser
-    const char * kernel_string = cccc_parser_cuda(graph);
-
-    // printing the resulting kernel
-    printf("%s\n", kernel_string);
-
-    // free graph and nodes
+    printf("%s\n", ir);
     cccc_graph_free(graph);
 }
 ```
 
-this program outputs the following cuda kernel which includes both the forward and the backward pass
+this program outputs the following cuda kernel which includes both the forward and the backward pass all fused into a single kernel
 
 ```cuda
-#include <cuda_runtime.h>
-#include <cuda_fp16.h>
-
-__global__ void cccc_kernel(float * data_0, float * data_1, float * data_5) {
+__global__ void kernel(float * data_0, float * data_2, float * data_11) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if (idx < 6) return;
 
-    data_1[idx] = log(data_0[idx]);
-    float data_2 = 1.000000;
-    float data_3 = 1/(data_0[idx]);
-    float data_4 = data_2[(idx/3)%1*1+(idx/1)%1*1] * data_3;
-    data_5[idx] = data_5[idx] + data_4;
+    float data_1 = log(data_0[idx]);
+    data_2[idx] = sin(data_1);
+    float data_3 = 1.000000;
+    float data_4 = 1.570796;
+    float data_5 = data_1 + data_4[(idx/3)%1*1+(idx/1)%1*1];
+    float data_6 = sin(data_5);
+    float data_7 = data_3[(idx/3)%1*1+(idx/1)%1*1] * data_6;
+    float data_8 = data_8 + data_7;
+    float data_9 = 1/(data_0[idx]);
+    float data_10 = data_8 * data_9;
+    data_11[idx] = data_11[idx] + data_10;
 }
 
 ```
-
-in particular, `data_1` calculates the forward pass, `data_3` calculates the partial `dy/dx`, and `data_4` multiplies it by the pre-existing `x` gradient, and `data_5` adds the result to previous `x` gradient
 

@@ -164,7 +164,7 @@ cccc_tensor * cccc_new_tensor_3d(cccc_type type, int ne0, int ne1, int ne2, bool
 }
 
 cccc_tensor * cccc_new_tensor_4d(cccc_type type, int ne0, int ne1, int ne2, int ne3,
-                                     bool has_grad) {
+                                 bool has_grad) {
     int shape[CCCC_DIMS_MAX] = {ne0, ne1, ne2, ne3};
 
     cccc_tensor * result = cccc_new_tensor_impl(type, shape);
@@ -438,7 +438,7 @@ cccc_tensor * cccc_div(cccc_tensor * lhs, cccc_tensor * rhs) {
 }
 
 cccc_tensor * cccc_cos(cccc_tensor * tensor) {
-    return cccc_sin(cccc_add(tensor, cccc_const(tensor->type, tensor->shape, M_PI_2)));
+    return cccc_sin(cccc_add(tensor, cccc_const(tensor->type, (int[]){1, 1, 1, 1}, M_PI_2)));
 }
 
 cccc_tensor * cccc_tanh(cccc_tensor * tensor) {
